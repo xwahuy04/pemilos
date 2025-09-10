@@ -10,7 +10,7 @@ $result = null;
 
 if (!empty($nis)) {
     // First get basic voter info
-    $sql = "SELECT id, nis, nama, kelas, sudah_memilih, waktu_memilih, pilihan 
+    $sql = "SELECT id, nis, nama, kelas, sudah_memilih, waktu_memilih, pilihan, tanda_tangan
             FROM pemilih 
             WHERE nis = ?";
     $stmt = $conn->prepare($sql);
@@ -30,7 +30,7 @@ if (!empty($nis)) {
     
     if ($stmt->num_rows > 0) {
         // Bind result variables
-        $stmt->bind_result($id, $nis_db, $nama, $kelas, $sudah_memilih, $waktu_memilih, $pilihan);
+        $stmt->bind_result($id, $nis_db, $nama, $kelas, $sudah_memilih, $waktu_memilih, $pilihan, $tanda_tangan);
         
         if ($stmt->fetch()) {
             $result = [
@@ -41,6 +41,7 @@ if (!empty($nis)) {
                 'sudah_memilih' => $sudah_memilih,
                 'waktu_memilih' => $waktu_memilih,
                 'pilihan' => $pilihan,
+                'tanda_tangan' => $tanda_tangan,
                 'nama_kandidat' => null
             ];
         }
@@ -113,6 +114,13 @@ if (!empty($nis)) {
                                     <i class="fas fa-check-circle me-2"></i> 
                                     <strong>Status:</strong> Sudah memilih<br>
                                     <strong>Waktu:</strong> <?php echo date('d/m/Y H:i', strtotime($result['waktu_memilih'])); ?><br>
+                                      <?php if (!empty($result['tanda_tangan'])): ?>
+                                                <img src="assets/uploads/signatures/<?= $result['tanda_tangan'] ?>"
+                                                    alt="Tanda Tangan" class="img-thumbnail" width="30%">
+                                            <?php else: ?>
+                                                <span class="text-muted">-</span>
+                                            <?php endif; ?>
+                                            <br>
                                     <?php if (!empty($result['nama_kandidat'])): ?>
                                         <strong>Pilihan:</strong> <?php echo htmlspecialchars($result['nama_kandidat']); ?>
                                     <?php endif; ?>

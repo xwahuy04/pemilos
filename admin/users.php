@@ -237,11 +237,11 @@ $belum_memilih = $conn->query($sql_belum)->fetch_assoc()['total'];
                                                 </a>
                                             <?php endif; ?>
                                             <?php if ($_SESSION['admin_level'] === 'super_admin' && $p['sudah_memilih']): ?>
-                                                <button class="btn btn-sm btn-warning reset-pemilih"
+                                                <!-- <button class="btn btn-sm btn-warning reset-pemilih"
                                                     data-id="<?= $p['id'] ?>"
                                                     data-name="<?= htmlspecialchars($p['nama']) ?>">
                                                     <i class="fas fa-sync-alt"></i>
-                                                </button>
+                                                </button> -->
                                             <?php endif; ?>
                                         </td>
                                     </tr>
