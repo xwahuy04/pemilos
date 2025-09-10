@@ -1,3 +1,7 @@
 /includes/config.php
 /includes/functions.php
 assets/uploads/
+vendor/
+composer.lock
+composer.json
+verify_nis_errors.log

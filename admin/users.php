@@ -1,6 +1,7 @@
 <?php
 require_once '../includes/config.php';
 require_once '../includes/functions.php';
+require_once '../vendor/autoload.php';
 
 redirectIfNotLoggedIn();
 
@@ -12,50 +13,88 @@ if ($_SESSION['admin_level'] === 'panitia') {
 $page_title = 'Kelola Pemilih - PEMILU ONLINE';
 require_once '../includes/header.php';
 
-// Handle form submission
+use PhpOffice\PhpSpreadsheet\IOFactory;
+
+$error_import = '';
+$success_import = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['excel_file'])) {
+    $file = $_FILES['excel_file']['tmp_name'];
+    try {
+        $spreadsheet = IOFactory::load($file);
+        $sheet = $spreadsheet->getActiveSheet();
+        $rows = $sheet->toArray();
+
+        // Asumsi baris pertama adalah header
+        foreach (array_slice($rows, 1) as $row) {
+            $nis   = isset($row[0]) ? trim($row[0]) : '';
+            $nama  = isset($row[1]) ? trim($row[1]) : '';
+            $kelas = isset($row[2]) ? trim($row[2]) : '';
+
+            if ($nis && $nama && $kelas) {
+                // Cek duplikat NIS
+                $cek = $conn->prepare("SELECT id FROM pemilih WHERE nis=?");
+                $cek->bind_param('s', $nis);
+                $cek->execute();
+                $cek->store_result();
+                if ($cek->num_rows == 0) {
+                    $stmt = $conn->prepare("INSERT INTO pemilih (nis, nama, kelas) VALUES (?, ?, ?)");
+                    $stmt->bind_param('sss', $nis, $nama, $kelas);
+                    $stmt->execute();
+                }
+                $cek->close();
+            }
+        }
+        $success_import = "Import berhasil!";
+    } catch (Exception $e) {
+        $error_import = "Gagal import: " . $e->getMessage();
+    }
+}
+
+
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $conn->begin_transaction();
-        
+
         if (isset($_POST['add_pemilih'])) {
             $nis = isset($_POST['nis']) ? formatNIS($_POST['nis']) : '';
             $nama = isset($_POST['nama']) ? sanitizeInput($_POST['nama']) : '';
             $kelas = isset($_POST['kelas']) ? sanitizeInput($_POST['kelas']) : '';
-            
+
             if (empty($nis) || empty($nama) || empty($kelas)) {
                 throw new Exception('Semua field harus diisi');
             }
-            
-            // Check if NIS exists
-$sql = "SELECT id FROM pemilih WHERE nis = ?";
-$stmt = $conn->prepare($sql);
-$stmt->bind_param('s', $nis);
-$stmt->execute();
-$stmt->store_result();  // Store the result
 
-if ($stmt->num_rows > 0) {
-    throw new Exception('NIS sudah terdaftar');
-}
-            
+            // Check if NIS exists
+            $sql = "SELECT id FROM pemilih WHERE nis = ?";
+            $stmt = $conn->prepare($sql);
+            $stmt->bind_param('s', $nis);
+            $stmt->execute();
+            $stmt->store_result();  // Store the result
+
+            if ($stmt->num_rows > 0) {
+                throw new Exception('NIS sudah terdaftar');
+            }
+
             // Insert to database
             $sql = "INSERT INTO pemilih (nis, nama, kelas) VALUES (?, ?, ?)";
             $stmt = $conn->prepare($sql);
             $stmt->bind_param('sss', $nis, $nama, $kelas);
-            
+
             if (!$stmt->execute()) {
                 throw new Exception('Gagal menambahkan pemilih');
             }
-            
+
             $_SESSION['success'] = 'Pemilih berhasil ditambahkan';
         }
-        
+
         $conn->commit();
     } catch (Exception $e) {
         $conn->rollback();
         $_SESSION['error'] = $e->getMessage();
     }
-    
+
     header("Location: users.php");
     exit();
 }
@@ -113,7 +152,7 @@ $belum_memilih = $conn->query($sql_belum)->fetch_assoc()['total'];
             </div>
             <?php unset($_SESSION['success']); ?>
         <?php endif; ?>
-        
+
         <?php if (isset($_SESSION['error'])): ?>
             <div class="alert alert-danger alert-dismissible fade show" role="alert">
                 <i class="fas fa-exclamation-circle me-2"></i><?php echo $_SESSION['error']; ?>
@@ -121,7 +160,7 @@ $belum_memilih = $conn->query($sql_belum)->fetch_assoc()['total'];
             </div>
             <?php unset($_SESSION['error']); ?>
         <?php endif; ?>
-        
+
         <div class="card shadow-sm">
             <div class="card-header bg-primary text-white">
                 <div class="d-flex justify-content-between align-items-center">
@@ -129,6 +168,9 @@ $belum_memilih = $conn->query($sql_belum)->fetch_assoc()['total'];
                     <div>
                         <button class="btn btn-light btn-sm" data-bs-toggle="modal" data-bs-target="#addPemilihModal">
                             <i class="fas fa-plus me-1"></i>Tambah
+                        </button>
+                        <button class="btn btn-light btn-sm" data-bs-toggle="modal" data-bs-target="#importPemilihModal">
+                            <i class="fas fa-file-import me-1"></i>Import
                         </button>
                     </div>
                 </div>
@@ -147,7 +189,7 @@ $belum_memilih = $conn->query($sql_belum)->fetch_assoc()['total'];
                         </a>
                     </div>
                 </div>
-                
+
                 <?php if (count($daftar_pemilih) > 0): ?>
                     <div class="table-responsive">
                         <table class="table table-bordered table-hover">
@@ -181,23 +223,23 @@ $belum_memilih = $conn->query($sql_belum)->fetch_assoc()['total'];
                                         <td><?= $p['nama_kandidat'] ?? '-' ?></td>
                                         <td>
                                             <?php if (!empty($p['tanda_tangan'])): ?>
-                                                <img src="../assets/uploads/signatures/<?= $p['tanda_tangan'] ?>" 
-                                                     alt="Tanda Tangan" class="img-thumbnail" width="80">
+                                                <img src="../assets/uploads/signatures/<?= $p['tanda_tangan'] ?>"
+                                                    alt="Tanda Tangan" class="img-thumbnail" width="80">
                                             <?php else: ?>
                                                 <span class="text-muted">-</span>
                                             <?php endif; ?>
                                         </td>
                                         <td>
                                             <?php if ($p['sudah_memilih']): ?>
-                                                <a href="export_pdf.php?id=<?= $p['id'] ?>" 
-                                                   class="btn btn-sm btn-info" target="_blank">
+                                                <a href="export_pdf.php?id=<?= $p['id'] ?>"
+                                                    class="btn btn-sm btn-info" target="_blank">
                                                     <i class="fas fa-file-pdf"></i>
                                                 </a>
                                             <?php endif; ?>
                                             <?php if ($_SESSION['admin_level'] === 'super_admin' && $p['sudah_memilih']): ?>
-                                                <button class="btn btn-sm btn-warning reset-pemilih" 
-                                                        data-id="<?= $p['id'] ?>" 
-                                                        data-name="<?= htmlspecialchars($p['nama']) ?>">
+                                                <button class="btn btn-sm btn-warning reset-pemilih"
+                                                    data-id="<?= $p['id'] ?>"
+                                                    data-name="<?= htmlspecialchars($p['nama']) ?>">
                                                     <i class="fas fa-sync-alt"></i>
                                                 </button>
                                             <?php endif; ?>
@@ -229,8 +271,8 @@ $belum_memilih = $conn->query($sql_belum)->fetch_assoc()['total'];
                 <div class="modal-body">
                     <div class="mb-3">
                         <label for="nis" class="form-label">NIS</label>
-                        <input type="text" class="form-control" id="nis" name="nis" 
-                               placeholder="Contoh: 19680/041.063" required>
+                        <input type="text" class="form-control" id="nis" name="nis"
+                            placeholder="Contoh: 19680/041.063" required>
                         <div class="form-text">Format NIS: 19680/041.063 (tanpa spasi)</div>
                     </div>
                     <div class="mb-3">
@@ -309,6 +351,39 @@ $belum_memilih = $conn->query($sql_belum)->fetch_assoc()['total'];
     </div>
 </div>
 
+<!-- Import Pemilih Modal -->
+<div class="modal fade" id="importPemilihModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" enctype="multipart/form-data">
+                <div class="modal-header bg-primary text-white">
+                    <h5 class="modal-title"><i class="fas fa-file-import me-2"></i>Import Data Pemilih (Excel)</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <?php if ($error_import): ?>
+                        <div class="alert alert-danger"><?= $error_import ?></div>
+                    <?php endif; ?>
+                    <?php if ($success_import): ?>
+                        <div class="alert alert-success"><?= $success_import ?></div>
+                    <?php endif; ?>
+                    <div class="mb-3">
+                        <label for="excel_file" class="form-label">File Excel</label>
+                        <input type="file" class="form-control" id="excel_file" name="excel_file" accept=".xlsx,.xls" required>
+                        <div class="form-text">
+                            Format file: <b>NIS</b>, <b>Nama</b>, <b>Kelas</b> (baris pertama header).
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+                    <button type="submit" class="btn btn-primary" name="import_pemilih">Import</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <!-- Reset Pemilih Modal -->
 <div class="modal fade" id="resetPemilihModal" tabindex="-1" aria-hidden="true">
     <div class="modal-dialog">
@@ -349,7 +424,7 @@ $belum_memilih = $conn->query($sql_belum)->fetch_assoc()['total'];
                         <label for="file_csv" class="form-label">File CSV</label>
                         <input type="file" class="form-control" id="file_csv" name="file_csv" accept=".csv" required>
                         <div class="form-text">
-                            Format file CSV dengan kolom: NIS, Nama, Kelas. 
+                            Format file CSV dengan kolom: NIS, Nama, Kelas.
                             <a href="sample_pemilih.csv" download class="text-primary">Download contoh file</a>
                         </div>
                     </div>
@@ -378,7 +453,7 @@ $belum_memilih = $conn->query($sql_belum)->fetch_assoc()['total'];
                         <textarea class="form-control" id="paste_data" name="paste_data" rows="10" required></textarea>
                         <div class="form-text">
                             Format: NIS [tab] Nama [tab] Kelas (per baris). Contoh:<br>
-                            <code>19680/041.063  John Doe  XII TKJ 1</code><br>
+                            <code>19680/041.063 John Doe XII TKJ 1</code><br>
                             Atau NIS,Nama,Kelas (format CSV). Contoh:<br>
                             <code>19680/041.063,John Doe,XII TKJ 1</code>
                         </div>
@@ -394,59 +469,59 @@ $belum_memilih = $conn->query($sql_belum)->fetch_assoc()['total'];
 </div>
 
 <script>
-$(document).ready(function() {
-    // Handle edit modal
-    $('#editPemilihModal').on('show.bs.modal', function(event) {
-        const button = $(event.relatedTarget);
-        const id = button.data('id');
-        const nis = button.data('nis');
-        const nama = button.data('nama');
-        const kelas = button.data('kelas');
-        
-        const modal = $(this);
-        modal.find('#edit_id').val(id);
-        modal.find('#edit_nis').val(nis);
-        modal.find('#edit_nama').val(nama);
-        modal.find('#edit_kelas').val(kelas);
+    $(document).ready(function() {
+        // Handle edit modal
+        $('#editPemilihModal').on('show.bs.modal', function(event) {
+            const button = $(event.relatedTarget);
+            const id = button.data('id');
+            const nis = button.data('nis');
+            const nama = button.data('nama');
+            const kelas = button.data('kelas');
+
+            const modal = $(this);
+            modal.find('#edit_id').val(id);
+            modal.find('#edit_nis').val(nis);
+            modal.find('#edit_nama').val(nama);
+            modal.find('#edit_kelas').val(kelas);
+        });
+
+        // Handle delete modal
+        $('#deletePemilihModal').on('show.bs.modal', function(event) {
+            const button = $(event.relatedTarget);
+            const id = button.data('id');
+            const nama = button.data('nama');
+
+            const modal = $(this);
+            modal.find('#delete_id').val(id);
+            modal.find('#delete_nama').text(nama);
+        });
+
+        // Handle reset modal
+        $('#resetPemilihModal').on('show.bs.modal', function(event) {
+            const button = $(event.relatedTarget);
+            const id = button.data('id');
+            const nama = button.data('nama');
+
+            const modal = $(this);
+            modal.find('#reset_id').val(id);
+            modal.find('#reset_nama').text(nama);
+        });
+
+        // Format NIS input (remove spaces)
+        $('input[name="nis"]').on('input', function() {
+            $(this).val($(this).val().replace(/\s+/g, ''));
+        });
+
+        // Handle reset pemilih
+        $('.reset-pemilih').click(function() {
+            const id = $(this).data('id');
+            const name = $(this).data('name');
+
+            if (confirm(`Anda yakin ingin mereset status pemilih ${name}?`)) {
+                window.location.href = `reset_pemilih.php?id=${id}`;
+            }
+        });
     });
-    
-    // Handle delete modal
-    $('#deletePemilihModal').on('show.bs.modal', function(event) {
-        const button = $(event.relatedTarget);
-        const id = button.data('id');
-        const nama = button.data('nama');
-        
-        const modal = $(this);
-        modal.find('#delete_id').val(id);
-        modal.find('#delete_nama').text(nama);
-    });
-    
-    // Handle reset modal
-    $('#resetPemilihModal').on('show.bs.modal', function(event) {
-        const button = $(event.relatedTarget);
-        const id = button.data('id');
-        const nama = button.data('nama');
-        
-        const modal = $(this);
-        modal.find('#reset_id').val(id);
-        modal.find('#reset_nama').text(nama);
-    });
-    
-    // Format NIS input (remove spaces)
-    $('input[name="nis"]').on('input', function() {
-        $(this).val($(this).val().replace(/\s+/g, ''));
-    });
-    
-    // Handle reset pemilih
-    $('.reset-pemilih').click(function() {
-        const id = $(this).data('id');
-        const name = $(this).data('name');
-        
-        if (confirm(`Anda yakin ingin mereset status pemilih ${name}?`)) {
-            window.location.href = `reset_pemilih.php?id=${id}`;
-        }
-    });
-});
 </script>
 
 <?php require_once '../includes/footer.php'; ?>
